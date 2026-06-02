@@ -8,7 +8,7 @@
 | ESADE email | nicolau.sanmillan@alumni.esade.edu |
 | GitHub repo URL | [nicolausmg/lobechat-aws](https://github.com/nicolausmg/lobechat-aws) (`joseporiolrius` invited as collaborator) |
 | Deployment baseline SHA | `4779a9e24c89acaf49fee180f4972cb5b5d267e7` |
-| Planned final tag | `final-v1.0.0` |
+| Planned final tag | `final-v0.7.0` |
 
 ## 2. Public URL
 
