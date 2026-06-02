@@ -1,0 +1,9 @@
+flowchart LR
+    U["Business users"] --> A["Route 53 -> ALB + ACM"]
+    A --> G["ASG: 2x app EC2 across 2 AZs"]
+    G --> R["RDS PostgreSQL Multi-AZ"]
+    G --> S["S3 versioned bucket"]
+    G --> Q["Dedicated Qdrant EC2 + gp3"]
+    G --> K["Secrets Manager"]
+    G --> C["CloudWatch logs / alarms"]
+    G --> X["Bedrock or OpenRouter"]

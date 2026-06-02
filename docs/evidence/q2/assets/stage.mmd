@@ -1,0 +1,7 @@
+flowchart LR
+    U["Internal stage users"] --> A["ALB + ACM"]
+    A --> E["Single app EC2: LobeChat + Casdoor + MCPHub + Hayhooks"]
+    E --> R["RDS PostgreSQL Single-AZ"]
+    E --> S["S3 bucket"]
+    E --> Q["Dedicated Qdrant EC2 + gp3"]
+    E --> X["External LLM provider"]

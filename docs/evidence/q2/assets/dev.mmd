@@ -1,0 +1,9 @@
+flowchart LR
+    U["Developer / Tester"] --> D["Caddy on shared t3a.xlarge EC2"]
+    D --> L["LobeChat"]
+    D --> C["Casdoor"]
+    L --> M["MCPHub + Hayhooks"]
+    L --> P["Postgres container"]
+    L --> O["MinIO container"]
+    M --> Q["Qdrant container on gp3 EBS"]
+    L --> X["External LLM provider"]
