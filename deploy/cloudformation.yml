@@ -1,0 +1,213 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: Single-instance LobeChat final project deployment in eu-west-1.
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: lobechat-final
+    AllowedPattern: "[a-zA-Z0-9-]+"
+    Description: Prefix used for resource names and tags.
+
+  UbuntuAmi:
+    Type: AWS::EC2::Image::Id
+    Description: Latest Canonical Ubuntu 24.04 LTS x86_64 gp3 AMI resolved dynamically by the deployment wrapper.
+
+  InstanceType:
+    Type: String
+    Default: t3a.xlarge
+    AllowedValues:
+      - t3a.xlarge
+      - t3.xlarge
+      - m6a.xlarge
+      - m6i.xlarge
+    Description: x86_64 instance with at least 4 vCPU and 16 GiB RAM.
+
+  RootVolumeSize:
+    Type: Number
+    Default: 80
+    MinValue: 60
+    Description: Root EBS volume size in GiB. The assignment requires gp3 and at least 60 GiB.
+
+  SshAllowedCidr:
+    Type: String
+    AllowedPattern: "(\\d{1,3}\\.){3}\\d{1,3}/\\d{1,2}"
+    Description: Workstation IPv4 CIDR allowed to SSH to the instance.
+
+  SshPublicKey:
+    Type: String
+    NoEcho: true
+    Description: Public key material for the deployment-specific EC2 key pair.
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.42.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-vpc"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-igw"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  InternetGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      InternetGatewayId: !Ref InternetGateway
+      VpcId: !Ref Vpc
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      CidrBlock: 10.42.1.0/24
+      MapPublicIpOnLaunch: true
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-subnet"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  PublicRouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref Vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-public-routes"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: InternetGatewayAttachment
+    Properties:
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+      RouteTableId: !Ref PublicRouteTable
+
+  PublicRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      RouteTableId: !Ref PublicRouteTable
+      SubnetId: !Ref PublicSubnet
+
+  LobeChatSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Public HTTPS and restricted SSH for the LobeChat final project.
+      SecurityGroupIngress:
+        - Description: SSH from the student workstation only.
+          IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: !Ref SshAllowedCidr
+        - Description: HTTP for ACME challenge and redirect.
+          IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - Description: HTTPS public application traffic.
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-sg"
+        - Key: Project
+          Value: !Ref ProjectName
+      VpcId: !Ref Vpc
+
+  DeploymentKeyPair:
+    Type: AWS::EC2::KeyPair
+    Properties:
+      KeyName: !Sub "${ProjectName}-${AWS::StackName}"
+      PublicKeyMaterial: !Ref SshPublicKey
+      Tags:
+        - Key: Project
+          Value: !Ref ProjectName
+
+  LobeChatInstance:
+    Type: AWS::EC2::Instance
+    Properties:
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            DeleteOnTermination: true
+            Encrypted: true
+            VolumeSize: !Ref RootVolumeSize
+            VolumeType: gp3
+      ImageId: !Ref UbuntuAmi
+      InstanceType: !Ref InstanceType
+      KeyName: !Ref DeploymentKeyPair
+      SecurityGroupIds:
+        - !Ref LobeChatSecurityGroup
+      SubnetId: !Ref PublicSubnet
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-ec2"
+        - Key: Project
+          Value: !Ref ProjectName
+      UserData:
+        Fn::Base64: !Sub |
+          #!/usr/bin/env bash
+          set -euxo pipefail
+          export DEBIAN_FRONTEND=noninteractive
+          apt-get update
+          apt-get install -y ca-certificates curl docker-compose-v2 docker.io git jq rsync
+          systemctl enable --now docker
+          usermod -aG docker ubuntu
+          touch /var/lib/cloud/lobechat-bootstrap-complete
+
+  ElasticIp:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+      Tags:
+        - Key: Name
+          Value: !Sub "${ProjectName}-eip"
+        - Key: Project
+          Value: !Ref ProjectName
+
+  ElasticIpAssociation:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      AllocationId: !GetAtt ElasticIp.AllocationId
+      InstanceId: !Ref LobeChatInstance
+
+Outputs:
+  AppHostname:
+    Description: sslip.io hostname used for Caddy TLS issuance.
+    Value: !Sub
+      - "${DashedIp}.sslip.io"
+      - DashedIp: !Join
+          - "-"
+          - !Split [".", !Ref ElasticIp]
+
+  ElasticIp:
+    Description: Elastic IP attached to the LobeChat EC2 instance.
+    Value: !Ref ElasticIp
+
+  InstanceId:
+    Description: EC2 instance ID.
+    Value: !Ref LobeChatInstance
+
+  SshCommand:
+    Description: SSH command template. Add the local private key path before use.
+    Value: !Sub "ssh ubuntu@${ElasticIp}"
+
+  VpcId:
+    Description: Dedicated VPC ID.
+    Value: !Ref Vpc

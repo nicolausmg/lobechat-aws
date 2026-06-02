@@ -1,0 +1,15 @@
+{
+	email {$ACME_EMAIL}
+}
+
+{$PUBLIC_APP_HOST} {
+	reverse_proxy lobe-chat:3210
+}
+
+{$PUBLIC_AUTH_HOST} {
+	reverse_proxy casdoor:8000
+}
+
+{$PUBLIC_S3_HOST} {
+	reverse_proxy minio:9000
+}

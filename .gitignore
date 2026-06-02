@@ -6,6 +6,7 @@ contrib/
 
 # Environment files with secrets
 .env
+deploy/.env.local
 db/flyway/.env.flyway
 db/flyway/.build/
 
@@ -18,9 +19,13 @@ uv.lock
 # AWS credentials and keys
 aws_credentials.yaml
 *.pem
+deploy/local/
 
 # IDE
 .idea/
 .vscode/
 *.swp
 config/ssh/
+
+# macOS
+.DS_Store
