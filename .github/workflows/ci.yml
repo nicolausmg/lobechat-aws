@@ -1,0 +1,103 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  static-analysis:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    # Build-free CI only: tests/ are live-stack integration tests that call running
+    # services (for example tests/test_vllm.py uses httpx/openai against /health), so
+    # this workflow does not run pytest or start/build any containers.
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # full history; default shallow clone makes these gates fail or scan nothing
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v6
+
+      - name: Install yamllint and actionlint
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install yamllint==1.37.1
+          curl -fsSL https://github.com/rhysd/actionlint/releases/download/v1.7.7/actionlint_1.7.7_linux_amd64.tar.gz -o /tmp/actionlint.tgz
+          tar -xzf /tmp/actionlint.tgz -C /tmp actionlint
+          sudo install /tmp/actionlint /usr/local/bin/actionlint
+
+      - name: Prepare placeholder env for compose validation
+        run: |
+          cp .env.example .env
+          echo "OPENAPI_MCP_HEADERS=dummy" >> .env
+        # Safe in CI: .env is copied from .env.example placeholders, and .gitignore excludes real .env files from git.
+
+      # Rollout choice: keep syntax/validity gates blocking, but make the first
+      # wave of security/hardening gates warn-only because this repo already has
+      # known findings. That keeps the workflow usable on day one while still
+      # surfacing the exact problems we need to clean up next.
+      - name: Hadolint sandbox image
+        # Warn-only: hadolint is expected to flag real issues such as unpinned
+        # sources/latest usage, so we show the findings now without making the
+        # repository's first CI rollout permanently red on known baseline debt.
+        continue-on-error: true
+        run: docker run --rm -i hadolint/hadolint < dockerfiles/sandbox.Dockerfile
+
+      - name: Hadolint mcphub image
+        # Warn-only: hadolint is expected to flag real issues such as unpinned
+        # sources/latest usage, so we show the findings now without making the
+        # repository's first CI rollout permanently red on known baseline debt.
+        continue-on-error: true
+        run: docker run --rm -i hadolint/hadolint < dockerfiles/mcphub.Dockerfile
+
+      - name: Validate Docker Compose file
+        run: docker compose -f docker-compose.yml config -q
+
+      - name: Lint YAML
+        run: yamllint -d "{extends: default, rules: {truthy: disable, line-length: disable}}" docker-compose.yml .github/workflows/ci.yml
+
+      - name: Lint GitHub Actions workflow
+        run: actionlint
+
+      - name: Scan git history for secrets
+        # Warn-only: gitleaks should still inspect history immediately, but any
+        # historical findings need deliberate cleanup instead of blocking the
+        # repo's first CI rollout before the baseline has been reviewed.
+        continue-on-error: true
+        run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo --redact --no-banner
+
+      - name: Trivy filesystem scan
+        # Warn-only: Trivy fs findings are useful signal on day one, but this
+        # repo has not had a prior vulnerability baseline, so we surface them
+        # first and decide later which ones should graduate to blocking.
+        continue-on-error: true
+        run: docker run --rm -v "$PWD:/work" -w /work aquasec/trivy:latest fs .
+
+      - name: Trivy config scan
+        # Warn-only: Trivy config is expected to report real misconfigurations in
+        # this compose/docker setup, so we expose them immediately while keeping
+        # blocking reserved for structural failures in the first CI rollout.
+        continue-on-error: true
+        run: docker run --rm -v "$PWD:/work" -w /work aquasec/trivy:latest config .
+
+      - name: Install project dev dependencies
+        run: uv sync --group dev --frozen
+
+      - name: Check conventional commits
+        run: |
+          # Mirror the existing local .githooks/commit-msg gate in CI, but without
+          # --commit-msg-file because there is no in-progress commit object here.
+          if [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ]; then
+            uv run cz check --rev-range origin/main..HEAD
+          else
+            uv run cz check -m "$(git log -1 --pretty=%B)"
+          fi
