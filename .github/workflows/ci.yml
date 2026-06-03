@@ -92,15 +92,14 @@ jobs:
         continue-on-error: true
         run: docker run --rm -v "$PWD:/work" -w /work aquasec/trivy:latest config .
 
-      - name: Install project dev dependencies
-        run: uv sync --group dev --frozen
-
       - name: Check conventional commits
         run: |
           # Mirror the existing local .githooks/commit-msg gate in CI, but without
           # --commit-msg-file because there is no in-progress commit object here.
+          # uv.lock is intentionally not committed, so use uv's --with tool mode
+          # instead of uv sync --frozen while still reading [tool.commitizen].
           if [ "$(git rev-list --count origin/main..HEAD)" -gt 0 ]; then
-            uv run cz check --rev-range origin/main..HEAD
+            uv run --with commitizen cz check --rev-range origin/main..HEAD
           else
-            uv run cz check -m "$(git log -1 --pretty=%B)"
+            uv run --with commitizen cz check -m "$(git log -1 --pretty=%B)"
           fi
