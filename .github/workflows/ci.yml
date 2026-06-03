@@ -63,7 +63,8 @@ jobs:
         run: docker compose -f docker-compose.yml config -q
 
       - name: Lint YAML
-        run: yamllint -d "{extends: default, rules: {truthy: disable, line-length: disable}}" docker-compose.yml .github/workflows/ci.yml
+        run: |
+          yamllint -d "{extends: default, rules: {truthy: disable, line-length: disable}}" docker-compose.yml .github/workflows/ci.yml
 
       - name: Lint GitHub Actions workflow
         run: actionlint
